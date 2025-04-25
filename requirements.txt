@@ -1,0 +1,20 @@
+# --- Core DL stack --------------------------------------------------
+torch==2.6.0           # PyTorch
+-f https://download.pytorch.org/whl/torch_stable.html
+torch_optimizer==0.3.0  # RAdam, Lookahead m.m.
+
+# --- Scientific / data ---------------------------------------------
+numpy==1.23.5
+h5py>=3.10               # HDF5-I/O
+uproot>=5.3              # ROOT-filer → NumPy/Awkward
+awkward>=2.5             # uregelmessige arrays
+awkward-pandas==2023.8.0  # kombinerer pandas og awkward-array
+scikit-learn>=1.4        # metrics, split, etc.
+
+# --- Utility --------------------------------------------------------
+tqdm>=4.66               # fremdriftsbarer
+requests>=2.31           # nedlasting av datasett
+
+# --- Visualisering / analyse ---------------------------------------
+matplotlib>=3.9
+seaborn>=0.13
