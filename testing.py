@@ -5,14 +5,14 @@ import seaborn as sns
 from sklearn.metrics import accuracy_score, confusion_matrix, roc_auc_score, roc_curve
 import torch.multiprocessing
 
-# Øker robusthet ved deling av minne i DataLoader
+# Increase robustness when sharing memory in the DataLoader
 torch.multiprocessing.set_sharing_strategy('file_system')
 
-# Importer modell og datasettklasse
+# Import model and dataset class
 from model import EAAN
 from dataset import H5Dataset
 
-# === Konfigurasjon og klasseliste ===
+# === Configuration and class list ===
 class_names = ["QCD", "Hbb", "Hcc", "Hgg", "H4q", "Hqql", "Zqq", "Wqq", "Tbqq", "Tbl"]
 signal_eff_dict = {
     "Hbb": 0.5, "Hcc": 0.5, "Hgg": 0.5, "H4q": 0.5, "Hqql": 0.99,
@@ -23,23 +23,23 @@ background_class = "QCD"
 os.makedirs("results", exist_ok=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# === Modellinnlasting ===
-input_dims = 15  # Antall partikkelfeatures
+# === Model loading ===
+input_dims = 15  # Number of particle features
 num_classes = len(class_names)
 model = EAAN(input_dims, num_classes).to(device)
 
-# Last inn trenede vekter
+# Load trained weights
 ckpt = torch.load("best_model.pt", map_location=device)
 if any(k.startswith("_orig_mod.") for k in ckpt):
     ckpt = {k.replace("_orig_mod.", ""): v for k, v in ckpt.items()}
 model.load_state_dict(ckpt)
 model.eval()
 
-# Tell parametre
+# Count parameters
 with open("results/parameter_count.txt", "w") as f:
     f.write(f"Trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}\n")
 
-# === Last inn testdata ===
+# === Load test data ===
 test_file = os.path.join("Dataset", "test.h5")
 test_dataset = H5Dataset(test_file)
 test_loader = torch.utils.data.DataLoader(
@@ -49,7 +49,7 @@ test_loader = torch.utils.data.DataLoader(
     shuffle=False
 )
 
-# === Evaluer modellen over hele testsettet ===
+# === Evaluate the model on the entire test set ===
 all_logits, all_labels = [], []
 with torch.no_grad():
     for batch in test_loader:
@@ -61,7 +61,7 @@ with torch.no_grad():
         all_logits.append(logits.cpu())
         all_labels.append(y)
 
-# Samle og konverter resultatene
+# Gather and convert results
 logits = torch.cat(all_logits, dim=0)
 labels = np.concatenate(all_labels, axis=0)
 probs = torch.softmax(logits, dim=1).numpy()
@@ -69,12 +69,12 @@ preds = np.argmax(probs, axis=1)
 if labels.ndim > 1:
     labels = np.argmax(labels, axis=1)
 
-# === Nøyaktighet (accuracy) ===
+# === Accuracy ===
 acc = accuracy_score(labels, preds)
 with open("results/accuracy.txt", "w") as f:
     f.write(f"Accuracy: {acc:.4f}\n")
 
-# === Konfusjonsmatrise ===
+# === Confusion matrix ===
 cm = confusion_matrix(labels, preds)
 plt.figure(figsize=(10, 8))
 sns.heatmap(
@@ -93,7 +93,7 @@ plt.tight_layout()
 plt.savefig("results/confusion_matrix.png")
 plt.close()
 
-# === AUC per klasse ===
+# === AUC per class ===
 true_onehot = np.eye(len(class_names))[labels]
 auc_per_class = []
 for i in range(len(class_names)):
@@ -115,7 +115,7 @@ with open("results/mean_auc.txt", "w") as f:
     f.write(f"Mean AUC (per class): {np.nanmean(auc_per_class):.4f}\n")
     f.write(f"Macro AUC (OVO): {macro_auc:.4f}\n")
 
-# === ROC-kurver per klasse ===
+# === ROC curves per class ===
 plt.figure()
 for i in range(len(class_names)):
     if np.any(true_onehot[:, i]):
@@ -129,7 +129,7 @@ plt.grid(True)
 plt.savefig("results/roc_curves.png")
 plt.close()
 
-# === Bakgrunnsrejektering @ signal-effisiens ===
+# === Background rejection @ signal efficiency ===
 rej_results = []
 for i, name in enumerate(class_names):
     if name == background_class or name not in signal_eff_dict:

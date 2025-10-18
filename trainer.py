@@ -2,26 +2,26 @@
 trainer.py
 ==========
 
-Robust treningsdriver for EAAN som kan kjøres uendret på CPU *eller* GPU.
+Robust training driver for EAAN that can run unmodified on CPU *or* GPU.
 
-Hovedpunkter
-------------
-* **Datasett-håndtering** via ``dataset.get_datasets``.
-* **Mixed precision** (AMP + GradScaler) og `torch.compile` aktiveres kun når
-  de er tilgjengelige *og* en CUDA-enhet finnes.
-* **Cosine-annealing LR** og **Lookahead + RAdam** som optimiseringsoppsett.
-* **Early stopping** på validerings-accuracy.
-* Automatisk _shape-fix_ dersom features ankommer flatet
-  (f.eks. ``(N, 1920, 1)``) slik at de matcher arkitekturen
-  uten å endre lagrede vekter.
-* Logger til ``runs/<run_name>/metrics.txt`` og lagrer beste
-  modell som ``best_model.pt`` i samme mappe.
+Highlights
+----------
+* **Dataset handling** via ``dataset.get_datasets``.
+* **Mixed precision** (AMP + GradScaler) and `torch.compile` are enabled only
+  when available *and* a CUDA device is present.
+* **Cosine-annealing LR** and **Lookahead + RAdam** as the optimization setup.
+* **Early stopping** on validation accuracy.
+* Automatic _shape fix_ if features arrive flattened
+  (e.g., ``(N, 1920, 1)``) so they match the architecture
+  without changing saved weights.
+* Logs to ``runs/<run_name>/metrics.txt`` and saves the best
+  model as ``best_model.pt`` in the same folder.
 
-Forventede moduler
-------------------
-``config.py``   : inneholder ``Config``-dataclass.
-``dataset.py``  : har ``get_datasets``-funksjon.
-``model.py``    : definerer ``EAAN``.
+Expected modules
+----------------
+``config.py``   : contains the ``Config`` dataclass.
+``dataset.py``  : provides the ``get_datasets`` function.
+``model.py``    : defines ``EAAN``.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from model import EAAN
 
 
 class Trainer:
-    """Klasse som samler *all* treningslogikk for EAAN-modellen."""
+    """Class that encapsulates *all* training logic for the EAAN model."""
 
     # -----------------------------------------------------------------
     def __init__(self, cfg: Config) -> None:
@@ -52,25 +52,25 @@ class Trainer:
         Parameters
         ----------
         cfg : Config
-            Hyper- og filparametere (se ``config.py``).
+            Hyperparameters and file paths (see ``config.py``).
 
-        Egenskaper opprettet
-        --------------------
-        ``self.dev``          : aktuell `torch.device`.
-        ``self.cuda``         : bool, om vi har GPU.
-        ``self.model``        : EAAN-instansen (evt. kompilert).
+        Attributes created
+        ------------------
+        ``self.dev``          : current `torch.device`.
+        ``self.cuda``         : bool, whether we have a GPU.
+        ``self.model``        : EAAN instance (optionally compiled).
         ``self.train_loader`` / ``self.val_loader``
         ``self.optimizer``    : Lookahead(RAdam).
         ``self.scheduler``    : Cosine-annealing LR.
-        ``self.autocast``     : kontekstmanager for AMP (eller ``nullcontext``).
-        ``self.scaler``       : ``GradScaler`` hvis GPU-AMP er aktiv.
-        ``self.log_file``     : åpen filhåndtak for epoch-logg.
+        ``self.autocast``     : context manager for AMP (or ``nullcontext``).
+        ``self.scaler``       : ``GradScaler`` if GPU-AMP is active.
+        ``self.log_file``     : open file handle for epoch logs.
         """
         self.cfg = cfg
         self.dev = torch.device(cfg.device)
         self.cuda = self.dev.type == "cuda"
 
-        # ---- 1) Backend-flagg (kun GPU) ----------------------------
+        # ---- 1) Backend flags (GPU only) ----------------------------
         if self.cuda:
             torch.backends.cudnn.benchmark = True
             torch.backends.cuda.matmul.allow_tf32 = True
@@ -101,7 +101,7 @@ class Trainer:
             pin_memory=self.cuda,
         )
 
-        # ---- 3) Modell (ev. torch.compile) -------------------------
+        # ---- 3) Model (optionally torch.compile) --------------------
         net = EAAN(cfg.input_dims, cfg.num_classes, conv_pooling="attention").to(
             self.dev
         )
@@ -111,7 +111,7 @@ class Trainer:
             else net
         )
 
-        # ---- 4) Optimiser / scheduler ------------------------------
+        # ---- 4) Optimizer / scheduler -------------------------------
         base_opt = RAdam(
             self.model.parameters(),
             lr=cfg.lr,
@@ -124,10 +124,10 @@ class Trainer:
             self.optimizer, T_max=cfg.epochs, eta_min=cfg.min_lr
         )
 
-        # ---- 5) Tapsfunksjon ---------------------------------------
+        # ---- 5) Loss function --------------------------------------
         self.criterion = nn.CrossEntropyLoss(label_smoothing=cfg.label_smooth)
 
-        # ---- 6) AMP / GradScaler-set-up ----------------------------
+        # ---- 6) AMP / GradScaler setup ------------------------------
         if self.cuda and hasattr(torch.cuda.amp, "GradScaler"):
             from torch.cuda.amp import GradScaler, autocast
 
@@ -139,7 +139,7 @@ class Trainer:
             self.scaler = None
             self.autocast = nullcontext  # type: ignore
 
-        # ---- 7) Logging --------------------------------------------
+        # ---- 7) Logging ---------------------------------------------
         self.run_dir = Path("runs") / cfg.run_name
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = (self.run_dir / "metrics.txt").open("w")
@@ -156,31 +156,31 @@ class Trainer:
         cfg: Config,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Gjør en minibatch klar for input til modellen.
+        Prepare a minibatch for model input.
 
-        * Sørger for riktig device.
-        * Fikser feature-shape dersom den er flatet eller permutert.
+        * Moves tensors to the correct device.
+        * Fixes feature shapes if they are flattened or permuted.
 
-        Aksepterte featureformer
-        ------------------------
-        ``(N, P, C)``  : riktig allerede.
-        ``(N, C, P)``  : permutes.
-        ``(N, flat, 1)``, ``(N, 1, flat)``, ``(N, flat)``  : reshapes,
-        der ``flat == pad_len * input_dims``.
+        Accepted feature shapes
+        -----------------------
+        ``(N, P, C)``  : already correct.
+        ``(N, C, P)``  : will be permuted.
+        ``(N, flat, 1)``, ``(N, 1, flat)``, ``(N, flat)``  : will be reshaped,
+        where ``flat == pad_len * input_dims``.
 
         Returns
         -------
-        pts   : (N, P, D)   – relative koordinater.
-        fts   : (N, P, C)   – partikkelfeatures (rettet).
-        mask  : (N, P, 1)   – 1 = gyldig partikkel.
-        lbl   : (N,)        – klasseindex.
+        pts   : (N, P, D)   – relative coordinates.
+        fts   : (N, P, C)   – particle features (corrected).
+        mask  : (N, P, 1)   – 1 = valid particle.
+        lbl   : (N,)        – class index.
         """
         nb = dict(non_blocking=use_cuda)
 
         pts = batch["X"]["points"].float().to(dev, **nb)  # (N, P, D)
         fts = batch["X"]["features"].float().to(dev, **nb)  # (N, ?, ?)
 
-        # ---------- shape-sanering ---------------------------------
+        # ---------- shape sanitation --------------------------------
         P, C = cfg.pad_len, cfg.input_dims
         flat_len = P * C
 
@@ -209,14 +209,14 @@ class Trainer:
     # -----------------------------------------------------------------
     def _run_epoch(self, loader, training: bool) -> Tuple[float, float]:
         """
-        Kjør én epoke (train *eller* validering).
+        Run one epoch (train *or* validation).
 
         Returns
         -------
         loss : float
-            Gjennomsnittlig krysstap per eksempel.
+            Average cross-entropy loss per example.
         acc  : float
-            Klassifikasjonsnøyaktighet.
+            Classification accuracy.
         """
         self.model.train() if training else self.model.eval()
         tot_loss = correct = seen = 0
@@ -249,7 +249,7 @@ class Trainer:
                         loss.backward()
                         self.optimizer.step()
 
-                # -------------- stat ------------------------------
+                # -------------- stats ------------------------------
                 B = lbl.size(0)
                 tot_loss += loss.item() * B
                 correct += (logits.argmax(1) == lbl).sum().item()
@@ -259,7 +259,7 @@ class Trainer:
 
     # -----------------------------------------------------------------
     def train(self) -> None:
-        """Hoved-treningssløyfe med early-stopping."""
+        """Main training loop with early stopping."""
         best_acc = epochs_no_improve = 0
 
         for epoch in range(1, self.cfg.epochs + 1):
@@ -282,7 +282,7 @@ class Trainer:
             )
             self.log_file.flush()
 
-            # --------- early stopping --------------------------
+            # --------- early stopping ----------------------------
             if val_acc > best_acc:
                 best_acc, epochs_no_improve = val_acc, 0
                 torch.save(
@@ -291,7 +291,7 @@ class Trainer:
             else:
                 epochs_no_improve += 1
                 if epochs_no_improve >= self.cfg.patience:
-                    print("⏹️  Early stop (ingen val-forbedring).")
+                    print("⏹️  Early stop (no validation improvement).")
                     break
 
         self.log_file.close()
