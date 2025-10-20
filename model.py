@@ -1,7 +1,7 @@
 """
-model.py  ─ Edge-based Attention Aggregation Network
-==================================================
-Komponentene her bygger på idéer fra:
+model.py  - Edge-based Attention Aggregation Network
+===================================================
+The components build on ideas from:
 
 • Particle Transformer for Jet Tagging
   https://arxiv.org/abs/2202.03772
@@ -15,9 +15,9 @@ Komponentene her bygger på idéer fra:
   https://arxiv.org/pdf/1709.01507
 • Deep Residual Learning
   https://arxiv.org/abs/1512.03385
-• PointNet++ (multiskalafusjon)
+• PointNet++ (multi-scale fusion)
   https://arxiv.org/abs/1706.02413
-• Graph U-Net (hard top-k-pooling)
+• Graph U-Net (hard top-k pooling)
   https://arxiv.org/abs/1905.05178
 """
 
@@ -36,7 +36,7 @@ def batch_distance_matrix_general(A: torch.Tensor,
     Parameters
     ----------
     A, B : (N, P, D) tensor
-        N – batch size, P – number of points, D – coordinate dims.
+        N - batch size, P - number of points, D - coordinate dimensions.
 
     Returns
     -------
@@ -73,14 +73,14 @@ def knn(topk_idx: torch.Tensor,
 # ---------------------------------------------------------------------
 class EdgeConvBlock(nn.Module):
     r"""
-    EdgeConv-basert blokk med opsjonell multi-head attention-pooling,
-    SE-gating og radialavstand som ekstra kantattributt.
+    EdgeConv-based block with optional multi-head attention pooling,
+    SE gating, and radial distance as an extra edge attribute.
 
-    • Kantfunksjonen følger Dynamic Graph CNN:
+    • The edge function follows Dynamic Graph CNN:
       h_ij = [x_i , x_j − x_i , r_ij]
-    • Attention-pooling implementerer Graph Attention Networks-mekanismen.
-    • SE-gating fra Squeeze-and-Excitation gir kanalre-vektlegging.
-    • Residual shortcut i stil med ResNet.
+    • Attention pooling implements the Graph Attention Networks mechanism.
+    • SE gating from Squeeze-and-Excitation re-weights feature channels.
+    • Residual shortcut in the style of ResNet.
     """
 
     def __init__(self, K: int, in_channels: int, channels: tuple[int, ...],
@@ -103,7 +103,7 @@ class EdgeConvBlock(nn.Module):
         self.head_dim = self.out_channels // self.H
         self.activation, self.with_bn = activation, with_bn
 
-        # -------- kant-MLP --------
+        # -------- edge MLP --------
         edge_in = 2 * in_channels + (1 if use_radial else 0)
         conv_in = edge_in
         self.convs, self.bns = nn.ModuleList(), nn.ModuleList()
@@ -129,7 +129,7 @@ class EdgeConvBlock(nn.Module):
                 nn.Conv2d(attn_hidden, self.H, 1)
             )
 
-        # -------- SE-gating --------
+        # -------- SE gating --------
         hidden = max(1, self.out_channels // se_ratio)
         self.se_fc1 = nn.Linear(self.out_channels, hidden, bias=False)
         self.se_fc2 = nn.Linear(hidden, self.out_channels, bias=False)
@@ -141,21 +141,21 @@ class EdgeConvBlock(nn.Module):
         """
         Parameters
         ----------
-        points   : (N, P, D) tensor  – koordinater (brukes kun til nabo-søket)
+        points   : (N, P, D) tensor  - coordinates (used only to find neighbors)
         features : (N, P, C_in) tensor
 
         Returns
         -------
-        (N, P, C_out) tensor  – oppdaterte punkt-features
+        (N, P, C_out) tensor  - updated point features
         """
         N, P, _ = features.shape
 
-        # dynamisk K-NN (fra Dynamic Graph CNN)
+        # dynamic K-NN (from Dynamic Graph CNN)
         dist = batch_distance_matrix_general(points, points)
         _, k_idx = torch.topk(-dist, k=self.K + 1, dim=2)
-        k_idx = k_idx[:, :, 1:]                      # fjern selvideks
+        k_idx = k_idx[:, :, 1:]                      # drop the self index
 
-        knn_feat = knn(k_idx, features)             # nabo-features
+        knn_feat = knn(k_idx, features)             # neighbor features
         center   = features.unsqueeze(2).expand(-1, -1, self.K, -1)
         edge     = torch.cat([center, knn_feat - center], dim=-1)
 
@@ -166,19 +166,19 @@ class EdgeConvBlock(nn.Module):
 
         x = edge.permute(0, 3, 1, 2)                # (N, C, P, K)
 
-        # ---------- attention-vekter ----------
+        # ---------- attention weights ----------
         if self.pooling == 'attention':
             w = self.attn_mlp(x).view(N, self.H, P, self.K)
             w = torch.softmax(w / self.tau, dim=-1)
 
-        # ---------- kant-MLP ----------
+        # ---------- edge MLP ----------
         for i, conv in enumerate(self.convs):
             x = conv(x)
             if self.with_bn:
                 x = self.bns[i](x)
             x = self.activation(x)
 
-        # ---------- pooling over naboer ----------
+        # ---------- pooling over neighbors ----------
         if self.pooling == 'attention':
             x = x.view(N, self.H, self.head_dim, P, self.K)
             x = (x * w.unsqueeze(2)).sum(dim=4).reshape(N, self.out_channels, P)
@@ -187,7 +187,7 @@ class EdgeConvBlock(nn.Module):
         else:  # max
             x = x.max(dim=3).values
 
-        # ---------- SE-gating ----------
+        # ---------- SE gating ----------
         s = torch.sigmoid(
             self.se_fc2(F.relu(self.se_fc1(x.mean(dim=2)), inplace=True))
         )
@@ -206,11 +206,11 @@ class EAAN(nn.Module):
     """
     Edge-based Attention Aggregation Network (EAAN)
 
-    Hierarkisk arkitektur for partikkel-/punkt-skyer:
-        • flere EdgeConv-blokker med dynamisk nabo-søking
-        • valgfri multiskala-fusjon av blokkutganger (som PointNet++)
-        • hard top-M pooling (fra Graph U-Net) før global aggregering
-        • fullt koblet hode for flerklasse-klassifisering
+    Hierarchical architecture for particle/point clouds:
+        • multiple EdgeConv blocks with dynamic neighbour search
+        • optional multi-scale fusion of block outputs (as in PointNet++)
+        • hard top-M pooling (from Graph U-Net) before global aggregation
+        • fully connected head for multi-class classification
     """
 
     # .................................................................
@@ -236,7 +236,7 @@ class EAAN(nn.Module):
         if use_fts_bn:
             self.bn_fts = nn.BatchNorm1d(input_dims)
 
-        # -------------------------------------------------- EdgeConv-blokker
+        # -------------------------------------------------- EdgeConv blocks
         self.edge_convs = nn.ModuleList()
         for i, (K, chs) in enumerate(conv_params):
             in_ch = input_dims if i == 0 else conv_params[i - 1][1][-1]
@@ -250,7 +250,7 @@ class EAAN(nn.Module):
                               use_radial=use_radial)
             )
 
-        # -------------------------------------------------- multiskala-fusjon
+        # -------------------------------------------------- multi-scale fusion
         if use_fusion:
             total = sum(c[-1] for _, c in conv_params)
             fus   = max(128, min(1024, (total // 128) * 128))
@@ -261,7 +261,7 @@ class EAAN(nn.Module):
         else:
             fus = conv_params[-1][1][-1]
 
-        # -------------------------------------------------- fullt koblet hode
+        # -------------------------------------------------- fully connected head
         layers, in_fc = [], fus
         for units, drop in fc_params:
             layers += [nn.Linear(in_fc, units), nn.ReLU()]
@@ -280,10 +280,10 @@ class EAAN(nn.Module):
         """
         Parameters
         ----------
-        points   : (N, P, D) – relative (Δη, Δφ) eller xyz-koordinater
-        features : (N, P, C_in) – partikkelfeatures
-        mask     : (N, P, 1)   – 1 = gyldig partikkel, 0 = *padding*
-                                 (beregnes automatisk hvis None)
+        points   : (N, P, D) - relative (Δη, Δφ) or xyz coordinates
+        features : (N, P, C_in) - particle features
+        mask     : (N, P, 1)   - 1 = valid particle, 0 = padding
+                                 (computed automatically if None)
 
         Returns
         -------
@@ -292,13 +292,13 @@ class EAAN(nn.Module):
         if mask is None:
             mask = (features.abs().sum(dim=2, keepdim=True) != 0).float()
 
-        coord_shift = (mask == 0).float() * 1e9  # hindrer at padding tas som nabo
+        coord_shift = (mask == 0).float() * 1e9  # prevents padding tokens from becoming neighbors
 
         if self.use_fts_bn:
             features = self.bn_fts(features.permute(0, 2, 1)) \
                        .permute(0, 2, 1) * mask
 
-        # ---------------- EdgeConv-stabel -----------------
+        # ---------------- EdgeConv stack -----------------
         outs = []
         for i, edge in enumerate(self.edge_convs):
             pts_in   = points if i == 0 else features
@@ -306,7 +306,7 @@ class EAAN(nn.Module):
             if self.use_fusion:
                 outs.append(features)
 
-        # ---------------- multiskala-fusjon ---------------
+        # ---------------- multi-scale fusion ---------------
         if self.use_fusion:
             fused    = torch.cat(outs, 2).permute(0, 2, 1)
             features = self.fusion_block(fused).permute(0, 2, 1) * mask
@@ -321,7 +321,7 @@ class EAAN(nn.Module):
             features = features[row, idx, :]
             mask     = mask[row, idx, :]
 
-        # ---------------- global aggregering --------------
+        # ---------------- global aggregation --------------
         pooled = (features.sum(dim=1) / mask.sum(dim=1)) \
                  if self.use_counts else features.mean(dim=1)
 

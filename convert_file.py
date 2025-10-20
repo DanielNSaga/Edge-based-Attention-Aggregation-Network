@@ -1,63 +1,63 @@
 """
 convert_file.py
 
-Dette skriptet konverterer ROOT-filer med jetdata til strukturerte HDF5-filer
-som kan brukes i maskinlæringsmodeller som ParticleNet. Det gjør følgende:
+This script converts jet ROOT files into structured HDF5 files
+that can be used by machine-learning models such as ParticleNet. It performs:
 
-1. Leser ROOT-filer og henter ut relevante jet- og partikkelfeatures.
-2. Beregner tilleggsegenskaper per partikkel:
-   - log(pt), log(energi), delta eta, delta phi, delta R
-   - relativ log(pt) og log(energi)
-   - ladning, partikkeltype (elektron, muon, osv.)
-   - impact parameter (d0, dz, og deres usikkerheter)
-3. Padder arrays med varierende lengde (jagged arrays) til fast størrelse.
-4. Splitter hvert datasett i trenings-, validerings- og testsett med lik størrelse per fil.
-5. Lagrer dataene som komprimerte HDF5-filer under ParticleNet/Dataset.
+1. Reads ROOT files and extracts relevant jet and particle features.
+2. Computes additional per-particle quantities:
+   - log(pt), log(energy), delta eta, delta phi, delta R
+   - relative log(pt) and log(energy)
+   - charge and particle type (electron, muon, etc.)
+   - impact parameter (d0, dz, and their uncertainties)
+3. Pads jagged arrays to a fixed size.
+4. Splits each dataset into training, validation, and test sets with equal size per file.
+5. Stores the data as compressed HDF5 files under ParticleNet/Dataset.
 """
 
-# Standardbibliotek
+# Standard library
 import os
 import glob
 import logging
 
-# Eksterne biblioteker
+# Third-party libraries
 import numpy as np
 import torch
 import h5py
 import uproot
 
-# === Mappestruktur ===
+# === Directory layout ===
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
-SOURCE_DIR = os.path.join(SCRIPT_DIR, "Data")       # Kilde-ROOT-filer
-DEST_DIR = os.path.join(SCRIPT_DIR, "Dataset")      # Mål-HDF5-filer
+SOURCE_DIR = os.path.join(SCRIPT_DIR, "Data")       # Source ROOT files
+DEST_DIR = os.path.join(SCRIPT_DIR, "Dataset")      # Destination HDF5 files
 os.makedirs(DEST_DIR, exist_ok=True)
 ROOT_FILES = glob.glob(os.path.join(SOURCE_DIR, "*.root"))
 
-# === Loggingoppsett ===
+# === Logging setup ===
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
-# === Konstanter ===
-MAX_PARTICLES = 128  # Maks antall partikler per jet (padding)
+# === Constants ===
+MAX_PARTICLES = 128  # Maximum number of particles per jet (padding)
 LABEL_COLS = [
     'label_QCD', 'label_Hbb', 'label_Hcc', 'label_Hgg',
     'label_H4q', 'label_Hqql', 'label_Zqq', 'label_Wqq',
     'label_Tbqq', 'label_Tbl'
 ]
-EPS = 1e-6  # Numerisk stabilitet (unngå log(0))
+EPS = 1e-6  # Numerical stability (avoid log(0))
 
 
 def pad_event(arr, max_len, pad_value=0.0):
     """
-    Padder eller trunkerer en array til en fast lengde.
+    Pad or truncate an array to a fixed length.
 
-    Parametre:
-        arr (array-lignende): Input-array med varierende lengde.
-        max_len (int): Ønsket fast lengde.
-        pad_value (float): Fyllverdi.
+    Parameters:
+        arr (array-like): Input array with variable length.
+        max_len (int): Desired fixed length.
+        pad_value (float): Fill value.
 
-    Returnerer:
-        np.ndarray: Array med lengde `max_len`.
+    Returns:
+        np.ndarray: Array with length `max_len`.
     """
     arr = np.asarray(arr, dtype=np.float32)
     if arr.shape[0] >= max_len:
@@ -68,17 +68,17 @@ def pad_event(arr, max_len, pad_value=0.0):
 
 def transform_dataframe(df, max_particles=128, eps=1e-6):
     """
-    Transformerer en DataFrame til et ordbokformat med ferdigbehandlede features.
+    Transform a DataFrame into a dictionary of processed features.
 
-    Parametre:
-        df (pd.DataFrame): DataFrame fra uproot.
-        max_particles (int): Antall partikler å padde til.
-        eps (float): Liten verdi for numerisk stabilitet.
+    Parameters:
+        df (pd.DataFrame): DataFrame returned by uproot.
+        max_particles (int): Number of particles to pad to.
+        eps (float): Small value for numerical stability.
 
-    Returnerer:
-        dict[str, np.ndarray]: Feature-ordbok. Alle arrays har lik form: (N, max_particles)
+    Returns:
+        dict[str, np.ndarray]: Feature dictionary. All arrays share shape (N, max_particles)
     """
-    # Pad alle nødvendige features
+    # Pad all required features
     px = np.stack([pad_event(p, max_particles) for p in df['part_px']])
     py = np.stack([pad_event(p, max_particles) for p in df['part_py']])
     pz = np.stack([pad_event(p, max_particles) for p in df['part_pz']])
@@ -86,7 +86,7 @@ def transform_dataframe(df, max_particles=128, eps=1e-6):
     delta_eta = np.stack([pad_event(p, max_particles) for p in df['part_deta']])
     delta_phi = np.stack([pad_event(p, max_particles) for p in df['part_dphi']])
 
-    # Type-flagg og ladning
+    # Type flags and charge
     part_charge          = np.stack([pad_event(p, max_particles) for p in df['part_charge']])
     part_isElectron      = np.stack([pad_event(p, max_particles) for p in df['part_isElectron']])
     part_isMuon          = np.stack([pad_event(p, max_particles) for p in df['part_isMuon']])
@@ -94,18 +94,18 @@ def transform_dataframe(df, max_particles=128, eps=1e-6):
     part_isNeutralHadron = np.stack([pad_event(p, max_particles) for p in df['part_isNeutralHadron']])
     part_isPhoton        = np.stack([pad_event(p, max_particles) for p in df['part_isPhoton']])
 
-    # Impact parameter og usikkerheter
+    # Impact parameter values and uncertainties
     part_d0val = np.stack([pad_event(p, max_particles) for p in df['part_d0val']])
     part_d0err = np.stack([pad_event(p, max_particles) for p in df['part_d0err']])
     part_dzval = np.stack([pad_event(p, max_particles) for p in df['part_dzval']])
     part_dzerr = np.stack([pad_event(p, max_particles) for p in df['part_dzerr']])
 
-    # Konverter til PyTorch for beregninger
+    # Convert to PyTorch for computations
     px_t, py_t, pz_t, E_t = map(torch.tensor, (px, py, pz, E))
     px_t, py_t, pz_t, E_t = px_t.float(), py_t.float(), pz_t.float(), E_t.float()
     mask = (E_t > 0).float()
 
-    # Beregn fysiske størrelser
+    # Compute physics-derived quantities
     pt_t = torch.sqrt(px_t**2 + py_t**2 + eps)
     sum_pt_t = (pt_t * mask).sum(dim=1, keepdim=True)
     sum_E_t  = (E_t * mask).sum(dim=1, keepdim=True)
@@ -127,7 +127,7 @@ def transform_dataframe(df, max_particles=128, eps=1e-6):
     tanh_d0 = torch.tanh(d0_t)
     tanh_dz = torch.tanh(dz_t)
 
-    # Lag one-hot labels
+    # Build one-hot labels
     labels = np.stack([df[col].values.astype(int) for col in LABEL_COLS], axis=1)
 
     return {
@@ -151,7 +151,7 @@ def transform_dataframe(df, max_particles=128, eps=1e-6):
         "label": labels
     }
 
-# === Første gjennomgang: finn minste antall eventer per fil for train/val/test ===
+# === First pass: find the minimum number of events per file for train/val/test ===
 train_counts, test_counts, val_counts = [], [], []
 
 for file in ROOT_FILES:
@@ -167,36 +167,36 @@ for file in ROOT_FILES:
         val_counts.append(n_val)
         logging.info(f"{os.path.basename(file)}: {n} events -> train {n_train}, test {n_test}, val {n_val}")
     except Exception as e:
-        logging.error(f"Feil under prosessering av {file}: {e}")
+        logging.error(f"Error while processing {file}: {e}")
 
 if not train_counts:
-    raise RuntimeError("Fant ingen gyldige ROOT-filer.")
+    raise RuntimeError("No valid ROOT files were found.")
 
-# Bruk minste felles antall eventer for jevn fordeling
+# Use the smallest common event count for an even split
 common_train = min(train_counts)
 common_test = min(test_counts)
 common_val = min(val_counts)
-logging.info(f"Felles split per fil: train={common_train}, test={common_test}, val={common_val}")
+logging.info(f"Common split per file: train={common_train}, test={common_test}, val={common_val}")
 
 
-# === Initialiser HDF5-filer ===
+# === Initialize HDF5 files ===
 def get_shape(arr):
-    """Returnerer datasettets form uten batch-dimensjon."""
+    """Return the dataset shape without the batch dimension."""
     return (0,) + arr.shape[1:] if arr.ndim > 1 else (0,)
 
-# Eksempeldata brukes til å opprette datastruktur
+# Example data used to set up the structure
 sample_df = uproot.open(ROOT_FILES[0])["tree"].arrays(library="pd")
 sample_data = transform_dataframe(sample_df, MAX_PARTICLES)
 dataset_shapes = {k: get_shape(v) for k, v in sample_data.items()}
 
 def create_h5_file(path, shapes):
-    """Oppretter HDF5-fil og datasett med angitte former og komprimering."""
+    """Create an HDF5 file and datasets with the requested shapes and compression."""
     f = h5py.File(path, "w")
     dsets = {
         key: f.create_dataset(
             key,
             shape=shape,
-            maxshape=(None,) + shape[1:],  # Utvidbart langs batch-dimensjonen
+            maxshape=(None,) + shape[1:],  # Extendable along the batch dimension
             chunks=True,
             compression="gzip",
             compression_opts=4
@@ -204,51 +204,51 @@ def create_h5_file(path, shapes):
     }
     return f, dsets
 
-# Lag tre datasettfiler
+# Create three dataset files
 train_f, train_dsets = create_h5_file(os.path.join(DEST_DIR, "train.h5"), dataset_shapes)
 test_f,  test_dsets  = create_h5_file(os.path.join(DEST_DIR, "test.h5"),  dataset_shapes)
 val_f,   val_dsets   = create_h5_file(os.path.join(DEST_DIR, "val.h5"),   dataset_shapes)
 
 
 def append(dset, arr):
-    """Legger til nye rader til et HDF5-datasett."""
+    """Append new rows to an HDF5 dataset."""
     cur = dset.shape[0]
     new = cur + arr.shape[0]
     dset.resize(new, axis=0)
     dset[cur:new] = arr
 
 
-# === Andre gjennomgang: konverter og skriv til HDF5 ===
+# === Second pass: convert and write to HDF5 ===
 for file in ROOT_FILES:
     try:
         df = uproot.open(file)["tree"].arrays(library="pd")
         data = transform_dataframe(df, MAX_PARTICLES)
         n_total = common_train + common_test + common_val
 
-        # Hopp over filer med for få eventer
+        # Skip files with too few events
         if data["label"].shape[0] < n_total:
-            logging.warning(f"Hopper over {file}: for få eventer.")
+            logging.warning(f"Skipping {file}: not enough events.")
             continue
 
-        # Del opp i trenings-/test-/valideringsindekser
+        # Split into training/test/validation indices
         idx = np.arange(data["label"].shape[0])
         np.random.shuffle(idx)
         train_idx = idx[:common_train]
         test_idx  = idx[common_train:common_train + common_test]
         val_idx   = idx[common_train + common_test:n_total]
 
-        # Skriv til hver HDF5-fil
+        # Write to each HDF5 file
         for key in data:
             append(train_dsets[key], data[key][train_idx])
             append(test_dsets[key],  data[key][test_idx])
             append(val_dsets[key],   data[key][val_idx])
 
-        logging.info(f"Prosesserte {os.path.basename(file)} med {n_total} eventer.")
+        logging.info(f"Processed {os.path.basename(file)} with {n_total} events.")
     except Exception as e:
-        logging.error(f"Feil under prosessering av {file}: {e}")
+        logging.error(f"Error while processing {file}: {e}")
 
-# Lukk filer etter skriving
+# Close files after writing
 train_f.close()
 test_f.close()
 val_f.close()
-logging.info("✅ Konvertering ferdig. HDF5-filene er lagret i ParticleNet/Dataset/")
+logging.info("Conversion complete. HDF5 files are stored in ParticleNet/Dataset/")
