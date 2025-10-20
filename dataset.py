@@ -3,22 +3,22 @@ import numpy as np
 import h5py
 from torch.utils.data import Dataset
 
-# Configure logging
+# Konfigurer logging
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(levelname)s: %(message)s')
 
 
 def pad_array(a, maxlen, value=0., dtype='float32'):
     """
-    Pad each array in a list to a fixed length.
+    Padder hver array i en liste til en fast lengde.
 
-    Parameters:
-        a (list of arrays): List of arrays, one per event (e.g., per particle list).
-        maxlen (int): Max number of elements per event.
-        value (float): Fill value for padding.
-        dtype (str): Data type of the output array.
+    Parametre:
+        a (list av arrays): Liste med arrays, én per event (f.eks. per partikkelliste).
+        maxlen (int): Maks antall elementer per event.
+        value (float): Fyllverdi ved padding.
+        dtype (str): Datatype på output-arrayen.
 
-    Returns:
-        np.ndarray: Array of shape (num_events, maxlen)
+    Returnerer:
+        np.ndarray: Array med form (antall_events, maxlen)
     """
     x = (np.ones((len(a), maxlen)) * value).astype(dtype)
     for idx, s in enumerate(a):
@@ -32,29 +32,29 @@ def pad_array(a, maxlen, value=0., dtype='float32'):
 # ---------------------------------------------------------------
 class H5Dataset(Dataset):
     """
-    Torch Dataset class for HDF5 files produced for jet tagging.
-    Can load the entire dataset into memory or stream from disk.
+    Torch Dataset-klasse for HDF5-filer produsert for jet-tagging.
+    Kan laste hele datasettet til minne eller bruke streaming fra disk.
     """
 
     def __init__(self, filepath, feature_dict=None, label='label',
                  pad_len=128, data_format='channel_last', stream=False):
         """
-        Initialize the HDF5 dataset.
+        Initialiserer HDF5-datasettet.
 
-        Parameters:
-            filepath (str): Path to the HDF5 file.
-            feature_dict (dict): Definition of which features belong to "points" and "features".
-            label (str): Name of the label field.
-            pad_len (int): Max number of particles per event.
-            data_format (str): 'channel_first' or 'channel_last'.
-            stream (bool): If True, load one event at a time from disk.
+        Parametre:
+            filepath (str): Sti til HDF5-filen.
+            feature_dict (dict): Definisjon av hvilke features som tilhører "points" og "features".
+            label (str): Navn på label-feltet.
+            pad_len (int): Maks antall partikler per event.
+            data_format (str): 'channel_first' eller 'channel_last'.
+            stream (bool): Hvis True, last kun én event om gangen fra disk.
         """
         self.filepath = filepath
         self.label = label
         self._stream = stream
         self.stack_axis = 1 if data_format == 'channel_first' else -1
 
-        # If no feature_dict is specified, use the default setup
+        # Hvis ingen feature_dict er spesifisert, brukes standardoppsett
         if feature_dict is None:
             feature_dict = {
                 "points": ["part_delta_eta", "part_delta_phi"],
@@ -70,17 +70,17 @@ class H5Dataset(Dataset):
         self.feature_dict = feature_dict
 
         if not stream:
-            logging.info(f"Loading {filepath} into memory …")
+            logging.info(f"Laster inn {filepath} i minnet …")
             with h5py.File(filepath, "r") as f:
-                # Get labels
+                # Hent labels
                 self._label = f[label][:]
                 self._values = {}
-                # Get features and stack in the correct order and format
+                # Hent features og stack i riktig rekkefølge og format
                 for group, cols in feature_dict.items():
                     arrs = []
                     for col in cols:
                         x = f[col][:]
-                        # Ensure all arrays have 3 dimensions
+                        # Sørg for at alle arrays har 3 dimensjoner
                         if x.ndim == 2:
                             if self.stack_axis == -1:  # channel_last
                                 x = x[..., None]
@@ -89,20 +89,20 @@ class H5Dataset(Dataset):
                         arrs.append(x)
                     self._values[group] = np.concatenate(arrs, axis=self.stack_axis)
             self._length = len(self._label)
-            logging.info("… done.")
+            logging.info("… ferdig.")
         else:
-            # Streaming: only read the length
+            # Streaming: bare les lengden
             with h5py.File(filepath, "r") as f:
                 self._length = f[label].shape[0]
             self._label, self._values = None, None
 
     def __len__(self):
-        """Return the number of events."""
+        """Returnerer antall eventer."""
         return self._length
 
     def __getitem__(self, idx):
         """
-        Return one event in the format:
+        Returnerer én event i format:
             {"X": {"points": …, "features": …}, "y": label}
         """
         if self._stream:
@@ -127,15 +127,15 @@ class H5Dataset(Dataset):
 # ---------------------------------------------------------------
 def get_datasets(train_path, val_path, test_path, **kwargs):
     """
-    Initialize H5Dataset instances for training, validation, and test data.
+    Initialiserer H5Dataset-instansene for trenings-, validerings- og testdata.
 
-    Parameters:
-        train_path (str): Path to the training file.
-        val_path (str): Path to the validation file.
-        test_path (str): Path to the test file.
-        **kwargs: Extra arguments forwarded to H5Dataset.
+    Parametre:
+        train_path (str): Sti til treningsfil.
+        val_path (str): Sti til valideringsfil.
+        test_path (str): Sti til testfil.
+        **kwargs: Ekstra argumenter sendes videre til H5Dataset.
 
-    Returns:
+    Returnerer:
         Tuple[Dataset, Dataset, Dataset]: train, val, test
     """
     train = H5Dataset(train_path, **kwargs)

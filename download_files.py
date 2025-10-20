@@ -1,14 +1,14 @@
 """
-Download and extract the JetClass Pythia training dataset (part 0)
+Last ned og pakk ut JetClass Pythia treningsdatasett (del 0)
 
-This script downloads the archive "JetClass_Pythia_train_100M_part0.tar" from Zenodo,
-validates its MD5 checksum, and extracts the contents directly into the project's "Data" folder.
+Dette skriptet laster ned arkivet "JetClass_Pythia_train_100M_part0.tar" fra Zenodo,
+validerer MD5-sjekksummen, og pakker ut innholdet direkte til prosjektets "Data"-mappe.
 
-The archive contains a directory with ROOT files.
+Arkivet inneholder en mappe med ROOT-filer.
 
-Based on: https://github.com/jet-universe/particle_transformer/blob/main/get_datasets.py
+Basert på: https://github.com/jet-universe/particle_transformer/blob/main/get_datasets.py
 
-Usage:
+Bruk:
     python download_files.py
 """
 
@@ -22,15 +22,15 @@ from tqdm import tqdm
 
 def download_file(url, dest_path, chunk_size=1024):
     """
-    Download a file from a given URL with a progress bar.
+    Laster ned en fil fra en gitt URL med fremdriftsvisning.
 
-    Parameters:
-        url (str): The URL to download the file from.
-        dest_path (str): Full file path where the file will be saved.
-        chunk_size (int): Number of bytes per downloaded chunk.
+    Parametre:
+        url (str): Nettadressen filen skal lastes ned fra.
+        dest_path (str): Full filsti hvor filen skal lagres.
+        chunk_size (int): Antall byte per nedlastet blokk.
 
-    Returns:
-        str: Full path to the downloaded file.
+    Returnerer:
+        str: Full sti til den nedlastede filen.
     """
     response = requests.get(url, stream=True)
     total = int(response.headers.get('content-length', 0))
@@ -46,23 +46,23 @@ def download_file(url, dest_path, chunk_size=1024):
 
 def validate_file(file_path, expected_hash, hash_alg='md5', chunk_size=8192):
     """
-    Check that the file's hash matches the expected value.
+    Sjekker at filens hashverdi stemmer overens med forventet verdi.
 
-    Parameters:
-        file_path (str): Path to the file to validate.
-        expected_hash (str): Expected hash value (as a string).
-        hash_alg (str): Hash algorithm, either 'md5' or 'sha256'.
-        chunk_size (int): Number of bytes to read per iteration.
+    Parametre:
+        file_path (str): Stien til filen som skal valideres.
+        expected_hash (str): Forventet hashverdi (som streng).
+        hash_alg (str): Hash-algoritme, enten 'md5' eller 'sha256'.
+        chunk_size (int): Antall byte som leses per gang.
 
-    Returns:
-        bool: True if the hash matches, otherwise False.
+    Returnerer:
+        bool: True hvis hash stemmer, ellers False.
     """
     if hash_alg.lower() == 'md5':
         hasher = hashlib.md5()
     elif hash_alg.lower() == 'sha256':
         hasher = hashlib.sha256()
     else:
-        raise ValueError("Supported hash algorithms are only 'md5' or 'sha256'.")
+        raise ValueError("Støttet hash-algoritme er kun 'md5' eller 'sha256'.")
 
     with open(file_path, 'rb') as f:
         for chunk in iter(lambda: f.read(chunk_size), b""):
@@ -72,60 +72,60 @@ def validate_file(file_path, expected_hash, hash_alg='md5', chunk_size=8192):
 
 def extract_archive(archive_path, extract_to):
     """
-    Extract a tar archive to the desired directory.
+    Pakker ut en tar-arkivfil til ønsket katalog.
 
-    Parameters:
-        archive_path (str): Full path to the tar archive.
-        extract_to (str): Directory to extract the archive into.
+    Parametre:
+        archive_path (str): Full sti til tar-arkivet.
+        extract_to (str): Katalogen arkivet skal pakkes ut til.
 
-    Raises:
-        ValueError: If the file is not a valid tar archive.
+    Kaster:
+        ValueError: Dersom filen ikke er et gyldig tar-arkiv.
     """
     if tarfile.is_tarfile(archive_path):
         with tarfile.open(archive_path, 'r') as tar:
             tar.extractall(path=extract_to)
     else:
-        raise ValueError("Invalid archive format. Only tar archives are supported.")
+        raise ValueError("Ugyldig arkivformat. Kun tar-arkiver støttes.")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Download and extract the JetClass Pythia training dataset (part 0) into the project's Data folder."
+        description="Last ned og pakk ut JetClass Pythia treningsdatasett (del 0) i prosjektets Data-mappe."
     )
-    parser.add_argument("--force", action="store_true", help="Force re-download even if the file already exists.")
+    parser.add_argument("--force", action="store_true", help="Tving ny nedlasting selv om filen allerede finnes.")
     args = parser.parse_args()
 
-    # URL and expected MD5 hash for part 0
+    # URL og forventet MD5-hash for del 0
     url = "https://zenodo.org/record/6619768/files/JetClass_Pythia_train_100M_part0.tar"
     expected_hash = "de4fd2dca2e68ab3c85d5cfd3bcc65c3"
 
-    # Target folder: the project's Data directory
+    # Målmappe: Data-mappen i prosjektet
     project_dir = os.getcwd()
     data_dir = os.path.join(project_dir, "Data")
     os.makedirs(data_dir, exist_ok=True)
     tar_path = os.path.join(data_dir, "JetClass_Pythia_train_100M_part0.tar")
 
-    # Download the file if it doesn't exist or --force is specified
+    # Last ned filen dersom den ikke finnes eller --force er spesifisert
     if os.path.exists(tar_path) and not args.force:
-        print(f"File already exists: {tar_path}. Validating hash...")
+        print(f"Filen finnes allerede: {tar_path}. Validerer hash...")
         if validate_file(tar_path, expected_hash, hash_alg='md5'):
-            print("Hash verification successful. Skipping download.")
+            print("Hash-verifisering vellykket. Hopper over nedlasting.")
         else:
-            print("Hash verification failed. Re-downloading.")
+            print("Hash-verifisering feilet. Laster ned på nytt.")
             os.remove(tar_path)
             download_file(url, tar_path)
     else:
         download_file(url, tar_path)
 
-    # Verify that the downloaded file is correct
-    print("Validating downloaded file...")
+    # Verifiser at nedlastet fil er korrekt
+    print("Validerer nedlastet fil...")
     if not validate_file(tar_path, expected_hash, hash_alg='md5'):
-        raise RuntimeError("The file's hash does not match the expected value. The download may be corrupted.")
+        raise RuntimeError("Filens hashverdi stemmer ikke med forventet verdi. Nedlastingen kan være korrupt.")
 
-    # Extract the archive
-    print("Extracting archive into the Data folder...")
+    # Pakk ut arkivet
+    print("Pakker ut arkiv i Data-mappen...")
     extract_archive(tar_path, data_dir)
-    print(f"Dataset extracted to {data_dir}")
+    print(f"Datasett pakket ut til {data_dir}")
 
 
 if __name__ == "__main__":
